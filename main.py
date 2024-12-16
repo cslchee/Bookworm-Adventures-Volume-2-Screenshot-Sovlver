@@ -4,6 +4,8 @@ import numpy as np
 from collections import Counter
 import json, time, os
 from dotenv import load_dotenv
+from math import sqrt
+import tile_palettes
 
 load_dotenv()
 
@@ -30,6 +32,8 @@ WAIT_TIME = 5 #seconds, keeps the while loop occupied
 
 # Globals
 analyzed_images = [] #For remember
+reader = easyocr.Reader(["en"], gpu=True)
+
 
 def clear_screenshots_folder() -> None:
     print("Deleting existing screenshots!")
@@ -51,18 +55,52 @@ def get_board_letters() -> str:
         print(f"Newest file: {newest_file}")
         image = Image.open(f"{SCREENSHOT_DIR}\\{newest_file}")
 
-        cropped_image = image.crop((300, 308, 502, 512)).convert("L") #Crop and convert to greyscale
-        #cropped_image.show()
+        cropped_image = image.crop((302, 310, 502, 510)) #Only get the letters on the board, 200x200
 
-        # Pytesseract provided poor results
-        # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe' #You need the actual pytesseract file, you can't just use the wrapper
-        # text = pytesseract.image_to_string(cropped_image, lang="eng")
+        # Get a cropped Image of each letter
+        individual_letters = []
+        for y in range(4):
+            for x in range(4):
+                x_cor = x * 50
+                y_cor = y * 50
+                individual_letters.append(cropped_image.crop((x_cor, y_cor, x_cor+50, y_cor+50)))
+
+        # Function to calculate the Euclidean distance between two RGB values
+        def color_distance(color1, color2):
+            return sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color1, color2)))
+
+        # Function to calculate the distance between two palettes
+        def palette_distance(palette1, palette2):
+            # Calculate the sum of minimum distances from each color in palette1 to palette2
+            return sum(min(color_distance(color1, color2) for color2 in palette2) for color1 in palette1)
+
+        # Function to find the closest palette to an image's palette
+        def find_closest_palette(tile_image: Image, existing_palettes, num_colors=8):
+            # Open the image and reduce it to its primary colors
+            colors = tile_image.getcolors(tile_image.size[0] * tile_image.size[1])  # Get all colors
+            colors = sorted(colors, key=lambda x: x[0], reverse=True)  # Sort by frequency
+            tile_palette = [color[1] for color in colors[:num_colors]]  # Take the top N colors
+
+            # Find the closest existing palette
+            closest_palette = min(existing_palettes, key=lambda palette: palette_distance(tile_palette, palette))
+            return closest_palette
+
+        gems = []
+        for letter in individual_letters:
+            letter_closest_palette = find_closest_palette(letter, tile_palettes.raw_palettes, num_colors=8)
+            letter_gem = [key for key, value in tile_palettes.tile_palettes.items() if value['palette'] == letter_closest_palette]
+            gems.append(letter_gem)
+        print(gems)
+        # TODO Compare tile to closest jem, get dictionary of multipliers & associate letters
+
+
+        # Cconvert to greyscale
+        cropped_image = cropped_image.convert("L")
 
         # Using cropped pillow image and EasyOCR
         np_image = np.array(cropped_image)
 
-        reader = easyocr.Reader(["en"], gpu=True)
-        raw_text = reader.readtext(np_image, detail=0)
+        raw_text = reader.readtext(np_image, detail=0) # Get text, ignore numeric details
         text = ''.join(raw_text).lower().strip()
 
         # Process text to clear out obvious inaccuracies
@@ -90,7 +128,8 @@ def word_damage_calculator(word: str) -> int:
     # Two-letter tile exception
     if 'qu' in word:
         damage += 2.75
-        word.replace('qu', '')
+        word = word.replace('qu', '')
+        print(f"\tFound a 'qu' word: {word}") # Debugging the two-letter tile 'qu' situation
 
     #Scan letters, add up their damage
     for letter in word:
@@ -98,7 +137,7 @@ def word_damage_calculator(word: str) -> int:
             if letter in value:
                 damage += key
     #print(f"{word} --> {damage}")
-    return damage
+    return round(damage, 2) # Remove all the ".0" for whole numbers
 
 
 def main():
@@ -124,15 +163,18 @@ def main():
             valid_words = []
             for word in ALL_WORDS:
                 word_counter = Counter(word)
-                if all(letter_count[char] >= word_counter[char] for char in word):
+                if all(letter_count[char] >= word_counter[char] for char in word): # Word has all the right characters
+                    # Avoids the 'u' in the 'qu' tile being used freely
+                    # TODO Might exclude 'u' if there's another 'u' outside of the 'qu' in the set
+                    if 'qu' in input_letters and 'u' in word and 'qu' not in word:
+                        continue # Skip word if it's using the 'u' that belongs to the 'qu' out of place
+
                     valid_words.append(word)
 
             # Sort them by the amount of damage the words do, then print the results
             valid_words.sort(key=word_damage_calculator, reverse=True)
-            for index, word in enumerate(valid_words, start=1):
-                print(word, end="\t")
-                if index % 5 == 0:
-                    print()
+            for index, word in enumerate(valid_words[:50], start=1):
+                print(f"{word:16}->[{word_damage_calculator(word):4}]  ", end="\n" if index % 5 == 0 else "")
             print(f"\n{'- ' * 30}")
 
         time.sleep(WAIT_TIME)
