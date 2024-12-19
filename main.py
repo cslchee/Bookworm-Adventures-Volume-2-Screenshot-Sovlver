@@ -65,34 +65,64 @@ def get_board_letters() -> str:
                 y_cor = y * 50
                 individual_letters.append(cropped_image.crop((x_cor, y_cor, x_cor+50, y_cor+50)))
 
-        # Function to calculate the Euclidean distance between two RGB values
-        def color_distance(color1, color2):
-            return sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color1, color2)))
+        def is_approximately_equal(color1, color2, threshold=5):
+            # Calculate the Euclidean distance between the two colors
+            distance = sum((c1 - c2) ** 2 for c1, c2 in zip(color1, color2)) ** 0.5
+            return distance < threshold
 
-        # Function to calculate the distance between two palettes
-        def palette_distance(palette1, palette2):
-            # Calculate the sum of minimum distances from each color in palette1 to palette2
-            return sum(min(color_distance(color1, color2) for color2 in palette2) for color1 in palette1)
+        def classify_color(r, g, b) -> str:
+            """Classifies a color based on RGB values into broader categories."""
+            if r > 200 and g > 200 and b > 200:
+                return "White"
+            elif r < 50 and g < 50 and b < 50:
+                return "Black"
+            # elif abs(r - g) < 20 and abs(g - b) < 20 and abs(r - b) < 20:
+            #     return "Grey"
+            elif r > g and r > b:
+                if g > 100 and g > 0.6 * r and b < 100:  # Stricter orange condition
+                    return "Orange"
+                elif g > 100 and b > 50 and r > 150:  # Light Brown condition
+                    return "---"
+                elif b > g and b > 0.5 * r:  # Pink condition
+                    return "Pink"
+                else:  # Default to Red if no clear Orange, Light Brown, or Pink
+                    return "Red"
+            elif g > r and g > b:
+                return "Green"
+            elif b > r and b > g:
+                if r > g:
+                    return "Purple"
+                else:
+                    return "Blue"
+            else:
+                return "Unknown"
 
-        # Function to find the closest palette to an image's palette
-        def find_closest_palette(tile_image: Image, existing_palettes, num_colors=8):
-            # Open the image and reduce it to its primary colors
-            colors = tile_image.getcolors(tile_image.size[0] * tile_image.size[1])  # Get all colors
-            colors = sorted(colors, key=lambda x: x[0], reverse=True)  # Sort by frequency
-            tile_palette = [color[1] for color in colors[:num_colors]]  # Take the top N colors
+        def get_dominant_color(img: Image):
+            """Turn the Image's pixels into an array then find averaged color value that best describes the image"""
+            img_array = np.array(img.resize((100, 100))) # Convert a slightly smaller image (processing time) to a NumPy array
+            pixels = img_array.reshape(-1, 3) # Flatten the array to process all pixels
+            color_counts = {} # Dictionary to count color categories
 
-            # Find the closest existing palette
-            closest_palette = min(existing_palettes, key=lambda palette: palette_distance(tile_palette, palette))
-            return closest_palette
+            # Classify each pixel
+            for pixel in pixels:
+                r, g, b = pixel[:3]
+                color = classify_color(r, g, b)
+                if color in color_counts:
+                    color_counts[color] += 1
+                else:
+                    color_counts[color] = 1
+
+            # Find the most frequent color
+            dominant_color = max(color_counts, key=color_counts.get)
+            return dominant_color
 
         gems = []
         for letter in individual_letters:
-            letter_closest_palette = find_closest_palette(letter, tile_palettes.raw_palettes, num_colors=8)
-            letter_gem = [key for key, value in tile_palettes.tile_palettes.items() if value['palette'] == letter_closest_palette]
-            gems.append(letter_gem)
-        print(gems)
-        # TODO Compare tile to closest jem, get dictionary of multipliers & associate letters
+            gems.append(get_dominant_color(letter))
 
+        # Display a 4x4 grid of the tile gems
+        for index, gem in enumerate(gems, start=1):
+            print(f'{gem:12}',end='\n' if index % 4 == 0 else '')
 
         # Cconvert to greyscale
         cropped_image = cropped_image.convert("L")
@@ -104,8 +134,9 @@ def get_board_letters() -> str:
         text = ''.join(raw_text).lower().strip()
 
         # Process text to clear out obvious inaccuracies
-        for x, y in ((' ',''),('|',''),('0','o')): # Common bonus symbols
-            text = text.replace(x, y)
+        for x in (' ','|','/'): # Common bonus symbols
+            text = text.replace(x,'')
+        text = text.replace('0','o')
         for x in range(1,10): #In case it catches tile countdowns
             text = text.replace(str(x),'')
 
