@@ -16,9 +16,8 @@ Requires:
     -   An '.env' file with the key 'USER_ID' to your directory
         (Or just copy your directory into the 'screenshot_dir' constant and delete the 'dot_env' stuff)
 Notes:
-    - Does not take into account the color of gemstones when calculating/sorting by damage.
     - Bookwork Adventures Vol. 2 is no longer available for purchase on Steam.
-    - Easy OCR is better than Pytesserect (even with "--psm 11"), but it's still not perfect.
+    - EasyOCR works better than Pytesserect (even with "--psm 11"), but it's still not perfect.
 
 Potential Improvements:
     - Only show the top 10 results for each tier of letter count to avoid clutter.
@@ -33,6 +32,23 @@ WAIT_TIME = 5 #seconds, keeps the while loop occupied
 # Globals
 analyzed_images = [] #For remember
 reader = easyocr.Reader(["en"], gpu=True)
+gems_and_letters = {}
+GEM_DAMAGE_MODIFIERS = {
+    "Amethyst": 1.15,
+    "Emerald": 1.20,
+    "Sapphire": 1.25,
+    "Garnet": 1.30,
+    "Ruby": 1.35,
+    "Crystal": 1.50,
+    "Diamond": 2.00
+}
+LETTER_DAMAGE_AMOUNTS = {  # Taken From https://www.speedrun.com/bookworm_adventures_volume_2/guides/6x3x1
+    1: "adegilnorstu",
+    1.25: 'bcfhmp',
+    1.5: 'vwy',
+    1.75: 'jk',
+    2: 'xz'
+}
 
 
 def clear_screenshots_folder() -> None:
@@ -43,13 +59,14 @@ def clear_screenshots_folder() -> None:
             os.remove(file_path)
     print("Done!")
 
-def get_board_letters() -> str:
+def get_board_letters():
     #Get the newest screenshot
     files = [f for f in os.listdir(SCREENSHOT_DIR) if os.path.isfile(os.path.join(SCREENSHOT_DIR, f))] # get all files from the directory
     if not len(files): # len() == 0
-        return "" # No files found
+        return '' # No files found
     else:
         newest_file = files[-1]
+
 
     if newest_file not in analyzed_images:
         print(f"Newest file: {newest_file}")
@@ -65,35 +82,31 @@ def get_board_letters() -> str:
                 y_cor = y * 50
                 individual_letters.append(cropped_image.crop((x_cor, y_cor, x_cor+50, y_cor+50)))
 
-        def is_approximately_equal(color1, color2, threshold=5):
-            # Calculate the Euclidean distance between the two colors
-            distance = sum((c1 - c2) ** 2 for c1, c2 in zip(color1, color2)) ** 0.5
-            return distance < threshold
-
-        def classify_color(r, g, b) -> str:
+        def classify_color(r, g, b):
             """Classifies a color based on RGB values into broader categories."""
             if r > 200 and g > 200 and b > 200:
-                return "White"
+                return "Diamond" # Diamond
             elif r < 50 and g < 50 and b < 50:
                 return "Black"
             # elif abs(r - g) < 20 and abs(g - b) < 20 and abs(r - b) < 20:
             #     return "Grey"
+            # TODO 'Grey' could identify broken tiles...
             elif r > g and r > b:
-                if g > 100 and g > 0.6 * r and b < 100:  # Stricter orange condition
-                    return "Orange"
-                elif g > 100 and b > 50 and r > 150:  # Light Brown condition
+                if g > 100 and g > 0.6 * r and b < 100:
+                    return "Garnet" # Orange
+                elif g > 100 and b > 50 and r > 150:  # Brown/Normal Tile
                     return "---"
-                elif b > g and b > 0.5 * r:  # Pink condition
-                    return "Pink"
-                else:  # Default to Red if no clear Orange, Light Brown, or Pink
-                    return "Red"
+                elif b > g and b > 0.5 * r:  # Pink
+                    return "Crystal" # Pink
+                else:
+                    return "Ruby" # Red
             elif g > r and g > b:
-                return "Green"
+                return "Emerald" # Green
             elif b > r and b > g:
                 if r > g:
-                    return "Purple"
+                    return "Amethyst" # Purple
                 else:
-                    return "Blue"
+                    return "Sapphire" # Blue
             else:
                 return "Unknown"
 
@@ -142,32 +155,44 @@ def get_board_letters() -> str:
 
         analyzed_images.append(newest_file) # Add to the list of known files
 
+        global gems_and_letters
+        gems_and_letters = {}
+        for g, l in zip(gems, text):
+            if g == '---':
+                continue
+            if g in gems_and_letters.keys():
+                gems_and_letters[g] += l
+            else:
+                gems_and_letters[g] = l
+        print(gems_and_letters)
         return text
     else:
-        return ""
+        return ''
 
 def word_damage_calculator(word: str) -> int:
-    DAMAGE_AMOUNTS = {  # Taken From https://www.speedrun.com/bookworm_adventures_volume_2/guides/6x3x1
-        1: "adegilnorstu",
-        1.25: 'bcfhmp',
-        1.5: 'vwy',
-        1.75: 'jk',
-        2: 'xz'
-    }
+    """Calculates the damage that a word does"""
     damage = 0
+    global gems_and_letters
 
     # Two-letter tile exception
     if 'qu' in word:
         damage += 2.75
         word = word.replace('qu', '')
         print(f"\tFound a 'qu' word: {word}") # Debugging the two-letter tile 'qu' situation
+        # TODO What if the 'qu' is a gem?
 
     #Scan letters, add up their damage
     for letter in word:
-        for key, value in DAMAGE_AMOUNTS.items():
+        for key, value in LETTER_DAMAGE_AMOUNTS.items():
             if letter in value:
                 damage += key
-    #print(f"{word} --> {damage}")
+
+    # Apply the gem modifies, comment out to return just the raw damage
+    for gem_type, letters in gems_and_letters.items():
+        for gem_l in letters:
+            if gem_l in word:
+                damage *= GEM_DAMAGE_MODIFIERS[gem_type]
+
     return round(damage, 2) # Remove all the ".0" for whole numbers
 
 
@@ -182,6 +207,7 @@ def main():
 
     # Filter out words larger than 16 (max possible letters [only one in new local database]) and above 4 (ignore the simple stuff)
     ALL_WORDS = tuple([word for word in full_word_set if 16 >= len(word) > 5])
+    global gems_and_letters
 
     # Periodically scan the directory for new images, then test new ones for the best possible combinations
     while True:
@@ -199,7 +225,6 @@ def main():
                     # TODO Might exclude 'u' if there's another 'u' outside of the 'qu' in the set
                     if 'qu' in input_letters and 'u' in word and 'qu' not in word:
                         continue # Skip word if it's using the 'u' that belongs to the 'qu' out of place
-
                     valid_words.append(word)
 
             # Sort them by the amount of damage the words do, then print the results
