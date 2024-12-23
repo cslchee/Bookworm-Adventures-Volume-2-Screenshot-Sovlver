@@ -27,7 +27,7 @@ Potential Improvements:
 # Constants
 USER_ID = os.getenv('USER_ID')
 SCREENSHOT_DIR = f"C:\\Program Files (x86)\\Steam\\userdata\\{USER_ID}\\760\\remote\\3630\\screenshots"
-WAIT_TIME = 5 #seconds, keeps the while loop occupied
+WAIT_TIME = 3 #seconds, keeps the while loop occupied
 
 # Globals
 analyzed_images = [] #For remember
@@ -47,7 +47,8 @@ LETTER_DAMAGE_AMOUNTS = {  # Taken From https://www.speedrun.com/bookworm_advent
     1.25: 'bcfhmp',
     1.5: 'vwy',
     1.75: 'jk',
-    2: 'xz'
+    2: 'xz',
+    2.75: 'q'
 }
 
 
@@ -67,7 +68,7 @@ def get_board_letters():
     else:
         newest_file = files[-1]
 
-
+    # Analyze the new file (get its gems and letters)
     if newest_file not in analyzed_images:
         print(f"Newest file: {newest_file}")
         image = Image.open(f"{SCREENSHOT_DIR}\\{newest_file}")
@@ -153,6 +154,8 @@ def get_board_letters():
         for x in range(1,10): #In case it catches tile countdowns
             text = text.replace(str(x),'')
 
+        text = text.replace('qu','q') #The word database only sees 'qu' as a single q. quote --> qote.
+
         analyzed_images.append(newest_file) # Add to the list of known files
 
         global gems_and_letters
@@ -172,14 +175,8 @@ def get_board_letters():
 def word_damage_calculator(word: str) -> int:
     """Calculates the damage that a word does"""
     damage = 0
+    multiplier = 1
     global gems_and_letters
-
-    # Two-letter tile exception
-    if 'qu' in word:
-        damage += 2.75
-        word = word.replace('qu', '')
-        print(f"\tFound a 'qu' word: {word}") # Debugging the two-letter tile 'qu' situation
-        # TODO What if the 'qu' is a gem?
 
     #Scan letters, add up their damage
     for letter in word:
@@ -191,9 +188,9 @@ def word_damage_calculator(word: str) -> int:
     for gem_type, letters in gems_and_letters.items():
         for gem_l in letters:
             if gem_l in word:
-                damage *= GEM_DAMAGE_MODIFIERS[gem_type]
-
-    return round(damage, 2) # Remove all the ".0" for whole numbers
+                multiplier *= GEM_DAMAGE_MODIFIERS[gem_type]
+    damage *= multiplier
+    return round(damage, 2)
 
 
 def main():
@@ -221,16 +218,12 @@ def main():
             for word in ALL_WORDS:
                 word_counter = Counter(word)
                 if all(letter_count[char] >= word_counter[char] for char in word): # Word has all the right characters
-                    # Avoids the 'u' in the 'qu' tile being used freely
-                    # TODO Might exclude 'u' if there's another 'u' outside of the 'qu' in the set
-                    if 'qu' in input_letters and 'u' in word and 'qu' not in word:
-                        continue # Skip word if it's using the 'u' that belongs to the 'qu' out of place
                     valid_words.append(word)
 
             # Sort them by the amount of damage the words do, then print the results
             valid_words.sort(key=word_damage_calculator, reverse=True)
-            for index, word in enumerate(valid_words[:50], start=1):
-                print(f"{word:16}->[{word_damage_calculator(word):4}]  ", end="\n" if index % 5 == 0 else "")
+            for index, word in enumerate(valid_words[:30], start=1):
+                print(f"{word.replace('q','qu'):16}->[{word_damage_calculator(word):4}]  ", end="\n" if index % 5 == 0 else "")
             print(f"\n{'- ' * 30}")
 
         time.sleep(WAIT_TIME)
